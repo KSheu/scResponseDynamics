@@ -1,11 +1,11 @@
 # scREALTIME
-A method for identifying stimulus-induced gene expression dynamics in single cells.
+A method for identifying stimulus-induced gene expression dynamics in single cells from time-series scRNASeq.
 
 ## Dependencies
 - Seurat\
-= Nbclust\
+- Nbclust\
 - matrixStats\
-= gridExtra\
+- gridExtra\
 
 ## Install
 Tested compatilbility with R version >=4.2.1.\
@@ -16,12 +16,12 @@ library(scREALTIME)
 
 ## Quick Start
 We can use the macrophage example data provided in the 'output' folder to run scREALTIME.
-
-### Example Use
 - Read in the Seurat object that contains annotated time-series scRNAseq data.
 - Use the getMetaData function to obtain the metadata in the correct format. 
 - Specify the timepoints to be used for the reconstruction, at least 4 timepoints. 
 - Run the scREALTIME function and store the results. 
+
+### Example Use
 ```
 macro = readRDS("./output/macrophage_M0_rep2only_500genes_DBEC.rds")
 metadata = getMetaData(macro, stimulus = "LPS", timepoints= select_timepoints)
