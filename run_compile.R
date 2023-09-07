@@ -110,7 +110,7 @@ if(1){
 
 ###############################################################################
 # Figure 2: impute all trajectories - March 2022 redo----
-# Note2self: from F://BACKUP.../Projects.../trajectory_method/tensor_trajectory.R
+# Note to self: from F://BACKUP.../Projects.../trajectory_method/tensor_trajectory.R
 
 # for M0 macrophages-----
 reduction_name = 'pca'
@@ -134,7 +134,7 @@ for (n in c("LPS", "TNF","P3CSK","CpG", "PIC","IFNb")){
                            timepoints = select_timepoints, num_trajectories = 1000, num_sim_pts = 100,
                            reduction = reduction_name, stimulus = n, consensus_measure = 'median',
                            interpolant = interpl, prob_method = 'distance', distance_metric = 'euclidean' ,
-                           varFilter = T, exp_prob = 1) # saying empty clusters -- insufficient data??
+                           varFilter = T, exp_prob = 1) 
   
   # saveRDS(reconst, paste0("./trajectory/reconstructed_M0_rep2only_500genes_",reduction_name,"onallstims_",n, "_",interpl,"_k_", num_archetypes,".rds"))
 }

@@ -1,0 +1,6 @@
+getMetaData             Input a Seurat object of single cell data and
+                        returns list object containing single cell
+                        trajectories
+scREALTIME              scREALTIME Input a Seurat object of single cell
+                        data and returns list object containing single
+                        cell trajectories

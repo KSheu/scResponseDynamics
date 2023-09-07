@@ -9,4 +9,4 @@ Figure 3: calculating trajectory feature values and mutual information analysis 
 Figure 4: comparison of single-cell response dynamics for different macrophage polarization states \
 Figure 5: analysis of gene-gene correlations across trajectory features for single cells \
 Figure 6: application of the Response Specificity Profile to trajectory features \
-Figure 7: identification of cell state based on single-cell response dynamics \
+Figure 7: identification of cell state based on single-cell response dynamics
