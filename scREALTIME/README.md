@@ -1,15 +1,15 @@
 # scREALTIME
-A method for identifying stimulus-induced gene expression dynamics in single cells
+A method for identifying stimulus-induced gene expression dynamics in single cells.
 
 ## Dependencies
-- Seurat
-= Nbclust
-- matrixStats
+- Seurat\
+= Nbclust\
+- matrixStats\
 = gridExtra
 
 ## Install
-Tested compatilbility with R version >=4.2.1.
-Install with: 
+Tested compatilbility with R version >=4.2.1.\
+Install with: \
 library(devtools)\
 install_github("ksheu/scResponseDynamics/scREALTIME")\
 library(scREALTIME)
@@ -28,9 +28,10 @@ reconst = scREALTIME(macro = macro, metadata = metadata, timepoints = select_tim
 							reduction = 'pca', stimulus = "LPS", consensus_measure = 'median',
 							interpolant = 'spline', prob_method = 'distance', distance_metric = 'euclidean' ,
 							varFilter = T, exp_prob = 1) 
+							
 
 ```
-scREALTIME trajectories are stored in the slot 'reconst$reconstructed_trajectories'.
+scREALTIME trajectories are stored in the slot `reconst$reconstructed_trajectories`.
 
 ### Parameters
 Several parameters can be tuned by the user based on the characteristics of the dataset. 
