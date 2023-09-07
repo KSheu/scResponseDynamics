@@ -52,7 +52,7 @@ scREALTIME(
 
 \item{varFilter}{= T}
 
-\item{exp_prob}{= 1}
+\item{exp_prob}{= 1 Raises the transition probability matrix to the power of exp_prob. Higher values make weak links weaker.}
 }
 \value{
 trajectoryObject
