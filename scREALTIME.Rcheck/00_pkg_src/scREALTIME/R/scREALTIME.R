@@ -17,8 +17,8 @@
 #' @param interpolant Method to interpolate timepoints ("spline","linear")
 #' @param data = "RNA" normalization from Seurat object to use (eg. "SCT", "ISNorm")
 #' @param prob_method = "distance" Options: 'distance', 'density', 'hybrid'. Linkage probability based on a 'distance' metric, 'density' of cells in archetypes, or 'hybrid'
-#' @param distance_metric = "euclidean"
-#' @param varFilter = T
+#' @param distance_metric = "euclidean" Distance metric to use to identify cell archetype links over timepoints. This must be one of "euclidean", "maximum", "manhattan", "canberra", "binary" or "minkowski".
+#' @param varFilter = T Filters out zero variance genes prior to kmeans clustering.
 #' @param exp_prob = 1 Raises the transition probability matrix to the power of exp_prob. Higher values make weak links weaker.
 #' @return trajectoryObject
 
@@ -163,7 +163,7 @@ scREALTIME = function(macro, metadata, num_archetypes=20, timepoints, num_trajec
   #print(str(mean_pcscores))
 
   # Generating walk probabilities matrix -----------------------------------------
-  distances = as.matrix(dist(mean_pcscores[,3:ncol(mean_pcscores)]))
+  distances = as.matrix(dist(mean_pcscores[,3:ncol(mean_pcscores)],method = distance_metric))
   rownames(distances) = mean_pcscores$Group.1
   colnames(distances) = mean_pcscores$Group.1
 
