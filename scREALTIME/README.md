@@ -1,5 +1,7 @@
 # scREALTIME
 A method for identifying stimulus-induced gene expression dynamics in single cells from time-series scRNASeq.
+![scREALTIME](https://github.com/KSheu/scResponseDynamics/assets/24832475/bc6c5d34-be60-42a0-9b76-f9c840d3b8d9)
+
 
 ## Dependencies
 - Seurat
