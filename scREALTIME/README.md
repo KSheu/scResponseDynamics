@@ -28,8 +28,8 @@ We can use the macrophage example data provided in the 'output' folder to run sc
 ### Example Use
 ```
 macro = readRDS("./output/macrophage_M0_rep2only_500genes_DBEC.rds")
-metadata = getMetaData(macro, stimulus = "LPS", timepoints= select_timepoints)
 select_timepoints = c(0.0, 0.25, 1, 3, 8)
+metadata = getMetaData(macro, stimulus = "LPS", timepoints= select_timepoints)
 reconst = scREALTIME(macro = macro, metadata = metadata, timepoints = select_timepoints,
 							num_archetypes = 20, data = "ISNorm",
 							num_trajectories = 1000, num_sim_pts = 100,

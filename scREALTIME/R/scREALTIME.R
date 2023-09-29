@@ -25,8 +25,9 @@
 scREALTIME = function(macro, metadata, num_archetypes=20, timepoints, num_trajectories = 1000, num_sim_pts = 100,
                       reduction = "pca", stimulus, consensus_measure = "median", interpolant="spline", data = "RNA", prob_method = 'distance', distance_metric = 'euclidean', varFilter = T, exp_prob = 1){
 
-  require(c('NMF', 'NbClust', 'RColorBrewer', 'Rfast', 'Seurat' , 'cowplot', 'devtools',
-            'factoextra', 'ggfortify', 'ggplot2', 'gridExtra', 'matrixStats'))
+  require(NbClust);require(Seurat);require(Rfast);require(devtools);require(factoextra)
+  require(ggplot2);require(RColorBrewer);require(matrixStats);require(gridExtra)
+
 
   # retrieve desired data subset------------------------------------------------
   cells_by_timept <- list()
