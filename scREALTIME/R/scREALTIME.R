@@ -25,8 +25,9 @@
 scREALTIME = function(macro, metadata, num_archetypes=20, timepoints, num_trajectories = 1000, num_sim_pts = 100,
                       reduction = "pca", stimulus, consensus_measure = "median", interpolant="spline", data = "RNA", prob_method = 'distance', distance_metric = 'euclidean', varFilter = T, exp_prob = 1){
 
-  require(NbClust);require(Seurat);require(Rfast);require(devtools);require(factoextra)
-  require(ggplot2);require(RColorBrewer);require(matrixStats);require(gridExtra)
+
+  require(NbClust); require(matrixStats); require(Rfast);require(Seurat);require(devtools)
+  require(RColorBrewer); require(ggplot2); require(gridExtra);
 
 
   # retrieve desired data subset------------------------------------------------
@@ -127,13 +128,6 @@ scREALTIME = function(macro, metadata, num_archetypes=20, timepoints, num_trajec
   }
 
 
-  #plot for sanity
-  require('factoextra')
-  require('ggfortify')
-
-  #fviz_eig(pca)
-  #autoplot(pca, data = df_for_pca, loadings = FALSE, colour = 'metadata.timept')
-
   cluster_densities <- as.data.frame(prop.table(as.matrix(cluster_counts), 2))
   cluster_densities <- cluster_densities^(exp_prob)
 
@@ -144,6 +138,7 @@ scREALTIME = function(macro, metadata, num_archetypes=20, timepoints, num_trajec
     cell_cluster_df <- c(cell_cluster_df, clusterings[[index]]$cluster)
   }
   cell_cluster_df <- as.data.frame(cell_cluster_df)
+
 
   pcscores <- as.data.frame(pcscores)
   pcscores_stim <- pcscores[rownames(pcscores) %in% rownames(metadata),]
@@ -168,7 +163,7 @@ scREALTIME = function(macro, metadata, num_archetypes=20, timepoints, num_trajec
   rownames(distances) = mean_pcscores$Group.1
   colnames(distances) = mean_pcscores$Group.1
 
-   # Normalize so larger distances have lower probability
+  # Normalize so larger distances have lower probability
 
   walks <- list()
   walk_probs <- matrix(nrow = num_trajectories, ncol = 2)
@@ -244,6 +239,7 @@ scREALTIME = function(macro, metadata, num_archetypes=20, timepoints, num_trajec
   }else{
     print('Invalid method for random walk probabilities')
   }
+
 
   # Walks now hold bins for random walks
   # Checking number of unique walks
