@@ -21,8 +21,8 @@ library(scREALTIME)
 ## Quick Start
 We can use the macrophage example data provided in the 'output' folder to run scREALTIME.
 - Read in the Seurat object that contains annotated time-series scRNAseq data.
-- Use the getMetaData function to obtain the metadata in the correct format. 
 - Specify the timepoints to be used for the reconstruction, at least 4 timepoints. 
+- Use the getMetaData function to obtain the metadata in the correct format. 
 - Run the scREALTIME function and store the results. 
 
 ### Example Use
