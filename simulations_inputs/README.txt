@@ -1,0 +1,1 @@
+Population-level trajectories of signaling effectors after stimulation (tables from Cheng et al. 2017), used for mathematical modeling.

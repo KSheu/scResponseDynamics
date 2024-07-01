@@ -1,2 +1,2 @@
 # scResponseDynamics
-Data files that are accepted into the imputation algorithm. ***Exceeds Github LFS - uploaded to Mendeley.
+Example file for scRNAseq data that is accepted into the scREAL-TIME function. 

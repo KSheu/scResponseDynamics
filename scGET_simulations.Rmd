@@ -1,0 +1,1151 @@
+---
+title: "Figure 1: Simulations"
+output: html_notebook
+---
+
+###############################################################################
+# Figure 1: Simulations of single-cell gene expression trajectories ----
+###############################################################################
+
+#load packages
+```{r} 
+library(deSolve);library(optimx);library(gdata); library(reshape2) ; library(ggalt); library(dplyr);library(ggplot2)
+library(dynamicTreeCut); library(gridExtra);library(ggpubr);library(amap); library(readxl);library(pheatmap)
+library(RColorBrewer);library(reshape2);library(ggdendro);library(grid);library(ape);library(extrafont)
+library(minpack.lm) # library for least squares fit using levenberg-marquart algorithm
+library(rootSolve); library(FME) ; library(pso)#for fitting
+library(greybox);library(truncnorm);library(ggalluvial);library(qlcMatrix)
+library(torch);library(splines);library(smplot2)
+setwd("F://scRNAseq_macro/scRNAseq_macro/")
+```
+
+# simulations of single cell gene trajectories prior to making data measurements
+
+```{r}
+# bulk input trajectories (tables from Cheng et al. 2017) 
+tf.ap1=read.delim("F://scRNAseq_macro/model_trajectory/2017_CellSystems_cheng_hoffmann/TableS2_AP1activationBMDM.txt")
+tf.nfkb=read.delim("F://scRNAseq_macro/model_trajectory/2017_CellSystems_cheng_hoffmann/TableS2_NFkBactivationBMDM.txt")
+tf.irf=read.delim("F://scRNAseq_macro/model_trajectory/2017_CellSystems_cheng_hoffmann/TableS2_IRFactivationBMDM.txt")
+tf.p38=read.delim("F://scRNAseq_macro/model_trajectory/2017_CellSystems_cheng_hoffmann/Table_p38activationBMDM.txt")
+
+tf.table.m = rbind(melt(data.frame(tf.ap1, tf = "AP1")), 
+                   melt(data.frame(tf.nfkb, tf = "NFkB")), 
+                   melt(data.frame(tf.irf, tf = "IRF")),
+                   melt(data.frame(tf.p38, tf = "p38")))
+tf.table.m$variable = as.numeric(gsub("X","",tf.table.m$variable))
+colnames(tf.table.m) = c("stim", "tf","time", "value")
+tf.table.m$stim = gsub("CPG", "CpG", tf.table.m$stim)
+tf.table.m$stim = gsub("PAM", "P3CSK", tf.table.m$stim)
+
+ggplot(tf.table.m, aes(time, value, group = tf))+geom_point(aes(color = tf), size = 2)+
+  geom_line(aes(color = tf, group = tf), size = 1)+facet_wrap( ~stim, ncol = 7)+theme_bw(base_size = 16)
+ggplot(tf.table.m, aes((time), value, group = tf))+geom_point(aes(color = tf), size = 2)+
+  geom_line(aes(color = tf, group = tf), size = 0.5, linetype= "dashed")+
+  geom_xspline(aes(color = tf, group = tf), spline_shape=-0.2, size=1)+
+  facet_wrap( ~stim, ncol = 7)+theme_bw(base_size = 16) +xlim(0,300)
+
+ggplot(tf.table.m[grepl("LPS|CpG|^PIC|P3CSK|TNF|IFNB", tf.table.m$stim),], aes((time), value, group = tf))+geom_point(aes(color = tf), size = 2)+
+  geom_line(aes(color = tf, group = tf), size = 0.5, linetype= "dashed")+
+  geom_xspline(aes(color = tf, group = tf), spline_shape=-0.2, size=1)+
+  facet_wrap( ~stim, ncol = 3)+theme_bw(base_size = 16) +xlim(0,300)
+
+```
+```{r}
+#generate single cell input functions based on bulk---------------------
+collect_inputs_TFA_all = NULL
+collect_inputs_TFN_all = NULL
+collect_inputs_TFI_all = NULL
+collect_inputs_p38_all = NULL
+
+collect_Timepts_TFA_all = NULL
+collect_Timepts_TFN_all = NULL
+collect_Timepts_TFI_all = NULL
+collect_Timepts_p38_all = NULL
+
+cell_num = 100  
+set.seed(123)
+for (St_name in c("LPS","CpG","PIC","P3CSK","TNF","IFNB")){
+  print(St_name)
+  collect_inputs_TFA = data.frame(stimulus = c(rep(St_name,cell_num)))
+  collect_inputs_TFN = data.frame(stimulus = c(rep(St_name,cell_num)))
+  collect_inputs_TFI = data.frame(stimulus = c(rep(St_name,cell_num)))
+  collect_inputs_p38 = data.frame(stimulus = c(rep(St_name,cell_num)))
+  
+  collect_Timepts_TFA = data.frame(stimulus = c(rep(St_name,cell_num)),Time0 = c(rep(0,cell_num)))
+  collect_Timepts_TFN = data.frame(stimulus = c(rep(St_name,cell_num)),Time0 = c(rep(0,cell_num)))
+  collect_Timepts_TFI = data.frame(stimulus = c(rep(St_name,cell_num)),Time0 = c(rep(0,cell_num)))
+  collect_Timepts_p38 = data.frame(stimulus = c(rep(St_name,cell_num)),Time0 = c(rep(0,cell_num)))
+  
+  #AP1 profile
+  TimepointsA = tf.table.m$time[tf.table.m$tf =="AP1" & tf.table.m$stim==St_name]
+  TFA_profile = tf.table.m$value[tf.table.m$tf =="AP1" & tf.table.m$stim==St_name]
+  
+  #NFkB profile
+  TimepointsN = tf.table.m$time[tf.table.m$tf =="NFkB" & tf.table.m$stim==St_name]
+  TFN_profile = tf.table.m$value[tf.table.m$tf =="NFkB" & tf.table.m$stim==St_name]
+  
+  #IRF profile
+  TimepointsI = tf.table.m$time[tf.table.m$tf =="IRF" & tf.table.m$stim==St_name]
+  TFI_profile = tf.table.m$value[tf.table.m$tf =="IRF" & tf.table.m$stim==St_name]
+  
+  #p38 profile
+  Timepointsp38 = tf.table.m$time[tf.table.m$tf =="p38" & tf.table.m$stim==St_name]
+  p38_profile = tf.table.m$value[tf.table.m$tf =="p38" & tf.table.m$stim==St_name]
+  
+  for (datapt in seq(1:6)){
+    print(datapt)
+    
+    # truncated normal distribution
+    lnorm_ap1 <- rtruncnorm(cell_num, a=0, b=Inf,(TFA_profile[datapt]), log10(TFA_profile[datapt]+1))
+    collect_inputs_TFA = cbind(collect_inputs_TFA,lnorm_ap1)
+    
+    lnorm_nfkb <- rtruncnorm(cell_num, a=0, b=Inf, (TFN_profile[datapt]), log10(TFN_profile[datapt]+1))
+    collect_inputs_TFN = cbind(collect_inputs_TFN,lnorm_nfkb)
+    
+    if(datapt<6){
+      lnorm_irf <- rtruncnorm(cell_num, a=0, b=Inf,(TFI_profile[datapt]), log10(TFI_profile[datapt]+1))
+      collect_inputs_TFI = cbind(collect_inputs_TFI,lnorm_irf)
+    }
+    
+    lnorm_p38 <- rtruncnorm(cell_num, a=0, b=Inf,(p38_profile[datapt]), log10(p38_profile[datapt]+1))
+    collect_inputs_p38 = cbind(collect_inputs_p38,lnorm_p38)
+    
+  }
+  for (datapt in c(2:6)){
+    print(datapt)
+    
+    jitter_TimepointsA = rtruncnorm(cell_num,a=0, b=Inf,TimepointsA[datapt], log(TimepointsA[datapt]+1))
+    collect_Timepts_TFA = cbind(collect_Timepts_TFA, jitter_TimepointsA)
+    
+    jitter_TimepointsN = rtruncnorm(cell_num,a=0, b=Inf,TimepointsN[datapt], log(TimepointsN[datapt]+1))
+    collect_Timepts_TFN = cbind(collect_Timepts_TFN, jitter_TimepointsN)
+    
+    if(datapt<6){
+      jitter_TimepointsI = rtruncnorm(cell_num,a=0, b=Inf,TimepointsI[datapt], log(TimepointsI[datapt]+1))
+      collect_Timepts_TFI = cbind(collect_Timepts_TFI, jitter_TimepointsI)
+    }
+    
+    jitter_Timepointsp38 = rtruncnorm(cell_num,a=0, b=Inf,Timepointsp38[datapt], log(Timepointsp38[datapt]+1))
+    collect_Timepts_p38 = cbind(collect_Timepts_p38, jitter_Timepointsp38)
+    
+  }
+  
+  
+  for (cell in seq(1:cell_num)){
+    # print(cell)
+    # TFA_profile_sc = collect_inputs_TFA[cell,-1]
+    # TFN_profile_sc = collect_inputs_TFN[cell,-1]
+    # TFI_profile_sc = collect_inputs_TFI[cell,-1]
+    # p38_profile_sc = collect_inputs_p38[cell,-1]
+    # 
+    # ap1_sc <- approxfun(TimepointsA, TFA_profile_sc, rule =2)#(Time-tau)
+    # nfkb_sc <- approxfun(TimepointsN, TFN_profile_sc, rule =2)#(Time-tau)
+    # irf_sc <- approxfun(TimepointsI, TFI_profile_sc, rule =2)#(Time-tau)
+    # p38_sc <- approxfun(Timepointsp38, p38_profile_sc, rule =2)#(Time)
+    # 
+    # curve(ap1_sc, -50,480, col = "darkorange",xlab = "time(mins)",  add = TRUE)
+    # curve(nfkb_sc, -50, 480, col = "red", xlab = "time(mins)", add = TRUE)
+    # curve(irf_sc, -50, 480, col = "darkgreen", xlab = "time(mins)",  add = TRUE)
+    # curve(p38_sc, -50, 480, col = "blue", xlab = "time(mins)", add = TRUE)
+  }
+  
+  collect_inputs_TFA_all = rbind(collect_inputs_TFA_all, collect_inputs_TFA)
+  collect_inputs_TFN_all = rbind(collect_inputs_TFN_all, collect_inputs_TFN)
+  collect_inputs_TFI_all = rbind(collect_inputs_TFI_all, collect_inputs_TFI)
+  collect_inputs_p38_all = rbind(collect_inputs_p38_all, collect_inputs_p38)
+  
+  collect_Timepts_TFA_all = rbind(collect_Timepts_TFA_all, collect_Timepts_TFA)
+  collect_Timepts_TFN_all = rbind(collect_Timepts_TFN_all, collect_Timepts_TFN)
+  collect_Timepts_TFI_all = rbind(collect_Timepts_TFI_all, collect_Timepts_TFI)
+  collect_Timepts_p38_all = rbind(collect_Timepts_p38_all, collect_Timepts_p38)
+  
+  
+}
+
+if (1){
+  #replace negatives with 0 to avoid high baseline, not needed w/ truncated normal
+  # collect_inputs_TFA_all[collect_inputs_TFA_all<0] <-0
+  # collect_inputs_TFN_all[collect_inputs_TFN_all<0] <-0
+  # collect_inputs_TFI_all[collect_inputs_TFI_all<0] <-0
+  # collect_inputs_p38_all[collect_inputs_p38_all<0] <-0
+  
+  #normalize values to range 0-1
+  collect_inputs_TFA_normalize = cbind(stimulus =collect_inputs_TFA_all$stimulus,
+                                       (collect_inputs_TFA_all[,-1]- min(collect_inputs_TFA_all[,-1]))/(max(collect_inputs_TFA_all[,-1])-min(collect_inputs_TFA_all[,-1]))) #rescale each curveset 0-1 over all stims
+  collect_inputs_TFN_normalize = cbind(stimulus =collect_inputs_TFN_all$stimulus,
+                                       (collect_inputs_TFN_all[,-1]- min(collect_inputs_TFN_all[,-1]))/(max(collect_inputs_TFN_all[,-1])-min(collect_inputs_TFN_all[,-1]))) #rescale each curveset 0-1 over all stims
+  collect_inputs_TFI_normalize = cbind(stimulus =collect_inputs_TFI_all$stimulus,
+                                       (collect_inputs_TFI_all[,-1]- min(collect_inputs_TFI_all[,-1]))/(max(collect_inputs_TFI_all[,-1])-min(collect_inputs_TFI_all[,-1]))) #rescale each curveset 0-1 over all stims
+  collect_inputs_p38_normalize = cbind(stimulus =collect_inputs_p38_all$stimulus,
+                                       (collect_inputs_p38_all[,-1]- min(collect_inputs_p38_all[,-1]))/(max(collect_inputs_p38_all[,-1])-min(collect_inputs_p38_all[,-1]))) #rescale each curveset 0-1 over all stims
+  
+  
+  par(mfrow = c(2, 3))
+  for (St_name in c("CpG","IFNB","LPS","P3CSK","PIC","TNF")){
+    print(St_name)
+    #AP1 profile
+    TimepointsA = tf.table.m$time[tf.table.m$tf =="AP1" & tf.table.m$stim==St_name]
+    TFA_profile = tf.table.m$value[tf.table.m$tf =="AP1" & tf.table.m$stim==St_name]
+    
+    #NFkB profile
+    TimepointsN = tf.table.m$time[tf.table.m$tf =="NFkB" & tf.table.m$stim==St_name]
+    TFN_profile = tf.table.m$value[tf.table.m$tf =="NFkB" & tf.table.m$stim==St_name]
+    
+    #IRF profile
+    TimepointsI = tf.table.m$time[tf.table.m$tf =="IRF" & tf.table.m$stim==St_name]
+    TFI_profile = tf.table.m$value[tf.table.m$tf =="IRF" & tf.table.m$stim==St_name]
+    
+    #p38 profile
+    Timepointsp38 = tf.table.m$time[tf.table.m$tf =="p38" & tf.table.m$stim==St_name]
+    p38_profile = tf.table.m$value[tf.table.m$tf =="p38" & tf.table.m$stim==St_name]
+    
+    #plot TF activity forcing functions for the stimulus
+    ap1 <- approxfun(TimepointsA, 
+                     (TFA_profile-min(collect_inputs_TFA_all[,-1]))/(max(collect_inputs_TFA_all[,-1])-min(collect_inputs_TFA_all[,-1])), rule =2)#(Time-tau)
+    nfkb <- approxfun(TimepointsN, 
+                      (TFN_profile-min(collect_inputs_TFN_all[,-1]))/(max(collect_inputs_TFN_all[,-1])-min(collect_inputs_TFN_all[,-1])), rule =2)#(Time-tau)
+    irf <- approxfun(TimepointsI, 
+                     (TFI_profile-min(collect_inputs_TFI_all[,-1]))/(max(collect_inputs_TFI_all[,-1])-min(collect_inputs_TFI_all[,-1])), rule =2)#(Time-tau)
+    p38 <- approxfun(Timepointsp38, 
+                     (p38_profile-min(collect_inputs_p38_all[,-1]))/(max(collect_inputs_p38_all[,-1])-min(collect_inputs_p38_all[,-1])), rule =2)#(Time)
+    curve(ap1, -10,480, col = "darkorange",xlab = "time(mins)", ylim =c(0,1.1),ylab="TF activity",main=St_name)
+    curve(nfkb, -50, 480, col = "red", xlab = "time(mins)", add = TRUE)
+    curve(irf, -50, 480, col = "darkgreen", xlab = "time(mins)",  add = TRUE)
+    curve(p38, -50, 480, col = "blue", xlab = "time(mins)", add = TRUE)
+    
+    
+    for (cell in seq(1:cell_num)){
+      print(cell)
+      TFA_profile_sc = collect_inputs_TFA_normalize[grepl(St_name, collect_inputs_TFA_normalize$stimulus),][cell,-1]
+      TFN_profile_sc = collect_inputs_TFN_normalize[grepl(St_name, collect_inputs_TFN_normalize$stimulus),][cell,-1]
+      TFI_profile_sc = collect_inputs_TFI_normalize[grepl(St_name, collect_inputs_TFI_normalize$stimulus),][cell,-1]
+      p38_profile_sc = collect_inputs_p38_normalize[grepl(St_name, collect_inputs_p38_normalize$stimulus),][cell,-1]
+      
+      TimepointsA_sc = collect_Timepts_TFA_all[grepl(St_name, collect_Timepts_TFA_all$stimulus),][cell,-1]
+      TimepointsN_sc = collect_Timepts_TFN_all[grepl(St_name, collect_Timepts_TFN_all$stimulus),][cell,-1]
+      TimepointsI_sc = collect_Timepts_TFI_all[grepl(St_name, collect_Timepts_TFI_all$stimulus),][cell,-1]
+      Timepointsp38_sc = collect_Timepts_p38_all[grepl(St_name, collect_Timepts_p38_all$stimulus),][cell,-1]
+      
+      # ap1_sc <- approxfun(TimepointsA_sc, TFA_profile_sc, rule =2)#(Time-tau)
+      # nfkb_sc <- approxfun(TimepointsN_sc, TFN_profile_sc, rule =2)#(Time-tau)
+      # irf_sc <- approxfun(TimepointsI_sc, TFI_profile_sc, rule =2)#(Time-tau)
+      # p38_sc <- approxfun(Timepointsp38_sc, p38_profile_sc, rule =2)#(Time)
+      # 
+      # curve(ap1_sc, -50,480, col = alpha("darkorange",0.5),xlab = "time(mins)", add = TRUE)
+      # curve(nfkb_sc, -50, 480, col = alpha("red",0.5), xlab = "time(mins)", add = TRUE)
+      # curve(irf_sc, -50, 480, col = alpha("darkgreen",0.5), xlab = "time(mins)",  add = TRUE)
+      # curve(p38_sc, -50, 480, col = alpha("blue",0.5), xlab = "time(mins)", add = TRUE)
+      
+      ap1_sc <- splinefun(TimepointsA_sc, TFA_profile_sc,method = "monoH.FC", ties = "constant")
+      nfkb_sc <- splinefun(TimepointsN_sc, TFN_profile_sc,method = "monoH.FC", ties = "constant")
+      irf_sc <- splinefun(TimepointsI_sc, TFI_profile_sc,method = "monoH.FC", ties = "constant")
+      p38_sc <- splinefun(Timepointsp38_sc, p38_profile_sc,method = "monoH.FC", ties = "constant")
+      
+      curve(ap1_sc, -50,480, col = alpha("darkorange",0.1),xlab = "time(mins)", add = TRUE)
+      curve(nfkb_sc, -50, 480, col = alpha("red",0.1), xlab = "time(mins)", add = TRUE)
+      curve(irf_sc, -50, 480, col = alpha("darkgreen",0.1), xlab = "time(mins)",  add = TRUE)
+      curve(p38_sc, -50, 480, col = alpha("blue",0.1), xlab = "time(mins)", add = TRUE)
+      
+    }
+    
+  }
+  
+  #plot with separated TFs
+  par(mfrow = c(6, 4))
+  for (St_name in c("CpG","IFNB","LPS","P3CSK","PIC","TNF")){
+    print(St_name)
+    #AP1 profile
+    TimepointsA = tf.table.m$time[tf.table.m$tf =="AP1" & tf.table.m$stim==St_name]
+    TFA_profile = tf.table.m$value[tf.table.m$tf =="AP1" & tf.table.m$stim==St_name]
+    
+    #NFkB profile
+    TimepointsN = tf.table.m$time[tf.table.m$tf =="NFkB" & tf.table.m$stim==St_name]
+    TFN_profile = tf.table.m$value[tf.table.m$tf =="NFkB" & tf.table.m$stim==St_name]
+    
+    #IRF profile
+    TimepointsI = tf.table.m$time[tf.table.m$tf =="IRF" & tf.table.m$stim==St_name]
+    TFI_profile = tf.table.m$value[tf.table.m$tf =="IRF" & tf.table.m$stim==St_name]
+    
+    #p38 profile
+    Timepointsp38 = tf.table.m$time[tf.table.m$tf =="p38" & tf.table.m$stim==St_name]
+    p38_profile = tf.table.m$value[tf.table.m$tf =="p38" & tf.table.m$stim==St_name]
+    
+    #plot TF activity forcing functions for the stimulus
+    ap1 <- approxfun(TimepointsA, 
+                     (TFA_profile-min(collect_inputs_TFA_all[,-1]))/(max(collect_inputs_TFA_all[,-1])-min(collect_inputs_TFA_all[,-1])), rule =2)#(Time-tau)
+    nfkb <- approxfun(TimepointsN, 
+                      (TFN_profile-min(collect_inputs_TFN_all[,-1]))/(max(collect_inputs_TFN_all[,-1])-min(collect_inputs_TFN_all[,-1])), rule =2)#(Time-tau)
+    irf <- approxfun(TimepointsI, 
+                     (TFI_profile-min(collect_inputs_TFI_all[,-1]))/(max(collect_inputs_TFI_all[,-1])-min(collect_inputs_TFI_all[,-1])), rule =2)#(Time-tau)
+    p38 <- approxfun(Timepointsp38, 
+                     (p38_profile-min(collect_inputs_p38_all[,-1]))/(max(collect_inputs_p38_all[,-1])-min(collect_inputs_p38_all[,-1])), rule =2)#(Time)
+    
+    curve(ap1, -50,480, col = "darkorange",xlab = "time(mins)", ylim =c(0,1),ylab="TF activity",main=paste0(St_name,"_AP1"))
+    for (cell in seq(1:cell_num)){
+      print(cell)
+      TFA_profile_sc = collect_inputs_TFA_normalize[grepl(St_name, collect_inputs_TFA_normalize$stimulus),][cell,-1]
+      TimepointsA_sc = collect_Timepts_TFA_all[grepl(St_name, collect_Timepts_TFA_all$stimulus),][cell,-1]
+      # ap1_sc <- approxfun(TimepointsA_sc, TFA_profile_sc, rule =2)#(Time-tau)
+      ap1_sc <- splinefun(TimepointsA_sc, TFA_profile_sc, method = "monoH.FC")#(Time-tau)
+      curve(ap1_sc, -50,480, col = alpha("darkorange",0.05),xlab = "time(mins)", add = TRUE)
+      
+    }
+    
+    curve(nfkb, -50, 480, col = "red", xlab = "time(mins)",  ylim =c(0,1),ylab="TF activity",main=paste0(St_name,"_NFkB"))
+    for (cell in seq(1:cell_num)){
+      print(cell)
+      TFN_profile_sc = collect_inputs_TFN_normalize[grepl(St_name, collect_inputs_TFN_normalize$stimulus),][cell,-1]
+      TimepointsN_sc = collect_Timepts_TFN_all[grepl(St_name, collect_Timepts_TFN_all$stimulus),][cell,-1]
+      # nfkb_sc <- approxfun(TimepointsN_sc, TFN_profile_sc, rule =2)#(Time-tau)
+      nfkb_sc <- splinefun(TimepointsN_sc, TFN_profile_sc,  method = "monoH.FC")#(Time-tau)
+      curve(nfkb_sc, -50, 480, col = alpha("red",0.05), xlab = "time(mins)", add = TRUE)
+    }
+    
+    curve(irf, -50, 480, col = "darkgreen", xlab = "time(mins)",   ylim =c(0,1),ylab="TF activity",main=paste0(St_name,"_IRF"))
+    for (cell in seq(1:cell_num)){
+      print(cell)
+      TFI_profile_sc = collect_inputs_TFI_normalize[grepl(St_name, collect_inputs_TFI_normalize$stimulus),][cell,-1]
+      TimepointsI_sc = collect_Timepts_TFI_all[grepl(St_name, collect_Timepts_TFI_all$stimulus),][cell,-1]
+      # irf_sc <- approxfun(TimepointsI_sc, TFI_profile_sc, rule =2)#(Time-tau)
+      irf_sc <- splinefun(TimepointsI_sc, TFI_profile_sc, method = "monoH.FC" )#(Time-tau)
+      curve(irf_sc, -50, 480, col = alpha("darkgreen",0.05), xlab = "time(mins)",  add = TRUE)
+      
+    }
+    
+    curve(p38, -50, 480, col = "blue", xlab = "time(mins)",  ylim =c(0,1),ylab="TF activity",main=paste0(St_name,"_p38"))
+    for (cell in seq(1:cell_num)){
+      print(cell)
+      p38_profile_sc = collect_inputs_p38_normalize[grepl(St_name, collect_inputs_p38_normalize$stimulus),][cell,-1]
+      Timepointsp38_sc = collect_Timepts_p38_all[grepl(St_name, collect_Timepts_p38_all$stimulus),][cell,-1]
+      # p38_sc <- approxfun(Timepointsp38_sc, p38_profile_sc, rule =2)#(Time)
+      p38_sc <- splinefun(Timepointsp38_sc, p38_profile_sc, method = "monoH.FC")#(Time)
+      # p38_sc <- data.frame(xspline(Timepointsp38_sc, p38_profile_sc, shape=-0.3, draw=F))
+      curve(p38_sc, -50, 480, col = alpha("blue",0.05), xlab = "time(mins)", add = TRUE)
+      
+    }
+  }
+  
+}
+
+
+```
+
+
+```{r}
+#plot in inputs in heatmap form and write out dfs--------
+if(1){ 
+  
+  plot_list=list()
+  count=1
+  for (St_name in c("CpG","IFNB","LPS","P3CSK","PIC","TNF")){
+    
+    print(St_name)
+    heatmapdf_ap1 = NULL
+    heatmapdf_nfkb = NULL
+    heatmapdf_irf = NULL
+    heatmapdf_p38 = NULL
+    for (cell in seq(1:cell_num)){
+      print(cell)
+      TFA_profile_sc = collect_inputs_TFA_normalize[grepl(St_name, collect_inputs_TFA_normalize$stimulus),][cell,-1]
+      TFN_profile_sc = collect_inputs_TFN_normalize[grepl(St_name, collect_inputs_TFN_normalize$stimulus),][cell,-1]
+      TFI_profile_sc = collect_inputs_TFI_normalize[grepl(St_name, collect_inputs_TFI_normalize$stimulus),][cell,-1]
+      p38_profile_sc = collect_inputs_p38_normalize[grepl(St_name, collect_inputs_p38_normalize$stimulus),][cell,-1]
+      
+      TimepointsA_sc = collect_Timepts_TFA_all[grepl(St_name, collect_Timepts_TFA_all$stimulus),][cell,-1]
+      TimepointsN_sc = collect_Timepts_TFN_all[grepl(St_name, collect_Timepts_TFN_all$stimulus),][cell,-1]
+      TimepointsI_sc = collect_Timepts_TFI_all[grepl(St_name, collect_Timepts_TFI_all$stimulus),][cell,-1]
+      Timepointsp38_sc = collect_Timepts_p38_all[grepl(St_name, collect_Timepts_p38_all$stimulus),][cell,-1]
+      
+      # ap1_sc <- approxfun(TimepointsA_sc, TFA_profile_sc, rule =2)#(Time-tau)
+      # nfkb_sc <- approxfun(TimepointsN_sc, TFN_profile_sc, rule =2)#(Time-tau)
+      # irf_sc <- approxfun(TimepointsI_sc, TFI_profile_sc, rule =2)#(Time-tau)
+      # p38_sc <- approxfun(Timepointsp38_sc, p38_profile_sc, rule =2)#(Time)
+      
+      ap1_sc <- splinefun(TimepointsA_sc, TFA_profile_sc,method = "monoH.FC")
+      nfkb_sc <- splinefun(TimepointsN_sc, TFN_profile_sc,method = "monoH.FC")
+      irf_sc <- splinefun(TimepointsI_sc, TFI_profile_sc,method = "monoH.FC")
+      p38_sc <- splinefun(Timepointsp38_sc, p38_profile_sc,method = "monoH.FC")
+      
+      x = seq(-50, 480, length.out = 530)
+      curve_ap1 = ap1_sc(x)
+      curve_nfkb= nfkb_sc(x)
+      curve_irf= irf_sc(x)
+      curve_p38=p38_sc(x)
+      
+      heatmapdf_ap1 = rbind(heatmapdf_ap1, curve_ap1)
+      heatmapdf_nfkb = rbind(heatmapdf_nfkb, curve_nfkb)
+      heatmapdf_irf = rbind(heatmapdf_irf, curve_irf)
+      heatmapdf_p38 = rbind(heatmapdf_p38, curve_p38)
+      
+    }
+    
+    heatmapdf_ap1= data.frame(heatmapdf_ap1)
+    heatmapdf_nfkb= data.frame(heatmapdf_nfkb)
+    heatmapdf_irf= data.frame(heatmapdf_irf)
+    heatmapdf_p38= data.frame(heatmapdf_p38)
+    
+    heatmapdf_ap1[heatmapdf_ap1<0] <-0
+    heatmapdf_nfkb[heatmapdf_nfkb<0] <-0
+    heatmapdf_irf[heatmapdf_irf<0] <-0
+    heatmapdf_p38[heatmapdf_p38<0] <-0
+    
+    
+    #write out the dataframes
+    # write.table(heatmapdf_ap1,paste0("./generated_scTFinputs/scTFinputs_",St_name,"_AP1.txt"),quote = F,sep="\t",row.names = F)
+    # write.table(heatmapdf_nfkb,paste0("./generated_scTFinputs/scTFinputs_",St_name,"_NFkB.txt"),quote = F,sep="\t",row.names = F)
+    # write.table(heatmapdf_irf,paste0("./generated_scTFinputs/scTFinputs_",St_name,"_IRF.txt"),quote = F,sep="\t",row.names = F)
+    # write.table(heatmapdf_p38,paste0("./generated_scTFinputs/scTFinputs_",St_name,"_p38.txt"),quote = F,sep="\t",row.names = F)
+    
+    p1=pheatmap(heatmapdf_ap1[order(apply(heatmapdf_ap1[,50:170],1,max), decreasing = T),], scale="none",
+                cluster_cols = F, cluster_rows = F,border_color = NA,
+                color = colorRampPalette(rev(brewer.pal(n = 7, name = "RdYlBu")))(100),
+                breaks = c(0,seq(0.01,0.5,length=100),1),
+                show_colnames = F, show_rownames = F, main = paste0(St_name,"_AP1"))
+    plot_list[[count]] =p1[[4]]; count=count+1
+    p2=pheatmap(heatmapdf_nfkb[order(apply(heatmapdf_nfkb[,50:170],1,max), decreasing = T),], scale="none",
+                cluster_cols = F, cluster_rows = F,border_color = NA,
+                color = colorRampPalette(rev(brewer.pal(n = 7, name = "RdYlBu")))(100),
+                breaks = c(0,seq(0.01,0.5,length=100),1),
+                show_colnames = F, show_rownames = F, main = paste0(St_name,"_NFkB"))
+    plot_list[[count]] =p2[[4]]; count=count+1
+    p3=pheatmap(heatmapdf_irf[order(apply(heatmapdf_irf[,50:170],1,max), decreasing = T),], scale="none",
+                cluster_cols = F, cluster_rows = F,border_color = NA,
+                color = colorRampPalette(rev(brewer.pal(n = 7, name = "RdYlBu")))(100),
+                breaks = c(0,seq(0.01,0.5,length=100),1),
+                show_colnames = F, show_rownames = F, main = paste0(St_name,"_IRF"))
+    plot_list[[count]] =p3[[4]]; count=count+1
+    p4=pheatmap(heatmapdf_p38[order(apply(heatmapdf_p38[,50:170],1,max), decreasing = T),], scale="none",
+                cluster_cols = F, cluster_rows = F,border_color = NA,
+                color = colorRampPalette(rev(brewer.pal(n = 7, name = "RdYlBu")))(100),
+                breaks = c(0,seq(0.01,0.5,length=100),1),
+                show_colnames = F, show_rownames = F, main = paste0(St_name,"_p38"))
+    plot_list[[count]] =p4[[4]]; count=count+1
+    
+    
+  }
+  grid.arrange(grobs=plot_list, nrow=4)
+}
+
+```
+
+
+```{r}
+#check p38 curve effect on kdeg----
+p38=read.delim("./generated_scTFinputs/scTFinputs_LPS_p38.txt")
+kdeg = matrix(log(2)/30, nrow = nrow(p38),ncol = ncol(p38))
+kdeg_p38=log(2)/((log(2)/kdeg) + 480*p38)
+pheatmap(kdeg_p38, cluster_cols = F, cluster_rows = T, show_colnames = F, main="kdeg_p38")
+
+
+```
+```{r}
+# differential equations----------------------------------------------
+TFA_profile_df_all = NULL
+TFN_profile_df_all = NULL
+TFI_profile_df_all = NULL
+p38_profile_df_all = NULL
+
+for (s in c("CpG", "IFNB", "LPS","P3CSK", "PIC", "TNF")){
+  TFA_tmp = read.delim(paste0("./generated_scTFinputs/scTFinputs_",s,"_AP1.txt"))
+  TFN_tmp = read.delim(paste0("./generated_scTFinputs/scTFinputs_",s,"_NFkB.txt"))
+  TFI_tmp = read.delim(paste0("./generated_scTFinputs/scTFinputs_",s,"_IRF.txt"))
+  p38_tmp = read.delim(paste0("./generated_scTFinputs/scTFinputs_",s,"_p38.txt"))
+
+  TFA_profile_df_all = rbind(TFA_profile_df_all, data.frame(stim=s,TFA_tmp))
+  TFN_profile_df_all = rbind(TFN_profile_df_all, data.frame(stim=s,TFN_tmp))
+  TFI_profile_df_all = rbind(TFI_profile_df_all, data.frame(stim=s,TFI_tmp))
+  p38_profile_df_all = rbind(p38_profile_df_all, data.frame(stim=s,p38_tmp))
+  
+}
+
+odeModel_steadystate <- function (Time, State, Pars) {
+  with(as.list(c(State, Pars)),{
+    
+    St_name<-stims[Pars[[c("stimulus")]] ]
+    print(paste0("currently simulating Stim: ",St_name))
+    # St_name = "TNF"
+    
+    gene.clust = GRS_list[Pars[c("GRS")]  ]
+    # gene.clust = collect_cost_all$best[collect_cost_all$gene==gene]
+    # gene.clust = "G2L"#genetypes[Pars[[c("genetypes")]] ]  #mC testing just one GRS for now
+    
+    # #AP1 profile
+    # TimepointsA = tf.table.m$time[tf.table.m$tf =="AP1" & tf.table.m$stim==St_name]
+    # TFA_profile = tf.table.m$value[tf.table.m$tf =="AP1" & tf.table.m$stim==St_name]
+    # 
+    # #NFkB profile
+    # TimepointsN = tf.table.m$time[tf.table.m$tf =="NFkB" & tf.table.m$stim==St_name]
+    # TFN_profile = tf.table.m$value[tf.table.m$tf =="NFkB" & tf.table.m$stim==St_name]
+    # 
+    # #IRF profile
+    # TimepointsI = tf.table.m$time[tf.table.m$tf =="IRF" & tf.table.m$stim==St_name]
+    # TFI_profile = tf.table.m$value[tf.table.m$tf =="IRF" & tf.table.m$stim==St_name]
+    # 
+    # #p38 profile
+    # Timepointsp38 = tf.table.m$time[tf.table.m$tf =="p38" & tf.table.m$stim==St_name]
+    # p38_profile = tf.table.m$value[tf.table.m$tf =="p38" & tf.table.m$stim==St_name]
+    
+ 
+    n = Pars[c("n")]
+    ktA<-Pars[c("ktA")]
+    ktN<-Pars[c("ktN")]
+    ktI<-Pars[c("ktI")]
+    k0 <- Pars[c("k0")]
+    k_deg = Pars[c("k_deg")]
+    k_syn = k_deg 
+    # tau = Pars[c("tau")]
+    tau = 0
+    cell = Pars[c("cell")]
+    
+    #TF activity forcing function for one input
+    # ap1 <- approxfun(TimepointsA, TFA_profile, rule =2)(Time-tau)
+    # nfkb <- approxfun(TimepointsN, TFN_profile, rule =2)(Time-tau)
+    # irf <- approxfun(TimepointsI, TFI_profile, rule =2)(Time-tau)
+    # p38 <- approxfun(Timepointsp38, p38_profile, rule =2)(Time)
+    # curve(ap1, -50,480, col = "darkorange",xlab = "time(mins)",ylim = c(0,1))
+    # curve(nfkb, -50, 480, col = "red", xlab = "time(mins)", add = TRUE)
+    # curve(irf, -50, 480, col = "darkgreen", xlab = "time(mins)",  add = TRUE)
+    # curve(p38, -50, 480, col = "blue", xlab = "time(mins)", add = TRUE)
+    
+    
+    # TFA_profile_df = read.delim(paste0("./generated_scTFinputs/scTFinputs_",St_name,"_AP1.txt"))
+    # TFN_profile_df = read.delim(paste0("./generated_scTFinputs/scTFinputs_",St_name,"_NFkB.txt"))
+    # TFI_profile_df = read.delim(paste0("./generated_scTFinputs/scTFinputs_",St_name,"_IRF.txt"))
+    # p38_profile_df = read.delim(paste0("./generated_scTFinputs/scTFinputs_",St_name,"_p38.txt"))
+    
+    TFA_profile_df = TFA_profile_df_all[TFA_profile_df_all$stim==St_name,-1]
+    TFN_profile_df = TFN_profile_df_all[TFN_profile_df_all$stim==St_name,-1]
+    TFI_profile_df = TFI_profile_df_all[TFI_profile_df_all$stim==St_name,-1]
+    p38_profile_df = p38_profile_df_all[p38_profile_df_all$stim==St_name,-1]
+    
+    TimeRange = c(-49:480)
+    
+    #TF activity forcing function for scTFinputs
+    ap1 <- approxfun(TimeRange, TFA_profile_df[cell,], rule =2)(Time-tau)
+    nfkb <- approxfun(TimeRange, TFN_profile_df[cell,], rule =2)(Time-tau)
+    irf <- approxfun(TimeRange, TFI_profile_df[cell,], rule =2)(Time-tau)
+    p38 <- approxfun(TimeRange, p38_profile_df[cell,], rule =2)(Time)
+    
+    
+    
+    # #single gates
+    # fA<-(1.0-k0)*((ktA*ap1)^n/(1.0+ktA*ap1)^n)+k0
+    # fN<-(1.0-k0)*((ktN*nfkb)^n/(1.0+ktN*nfkb)^n)+k0
+    # fI<-(1.0-k0)*((ktI*irf)^n/(1.0+ktI*irf)^n)+k0
+    # 
+    # #OR gate
+    # fIN<-(1.0-k0)*((ktN*nfkb+ktI*irf+ktN*ktI*nfkb*irf)^n/(1.0+ktN*nfkb+ktI*irf+ktN*ktI*nfkb*irf)^n)+k0
+    
+    
+    
+    #single gates
+    fA<-(1.0-k0)*((ktA*ap1)^n/(1.0+(ktA*ap1)^n))+k0
+    fN<-(1.0-k0)*((ktN*nfkb)^n/(1.0+(ktN*nfkb)^n))+k0
+    fI<-(1.0-k0)*((ktI*irf)^n/(1.0+(ktI*irf)^n))+k0
+    
+    #OR gate
+    fIN<-(1.0-k0)*(((ktN*nfkb)^n+(ktI*irf)^n+(ktN*ktI*nfkb*irf)^n)/(1.0+(ktN*nfkb)^n+(ktI*irf)^n+(ktN*ktI*nfkb*irf)^n))+k0
+    
+    #AND gate
+    fAIN<-(1.0-k0)*((ktA*ktN*ktI*ap1*nfkb*irf)^n /(1.0+ktA*ap1+ktN*nfkb+ktI*irf+ktA*ktN*ap1*nfkb+
+                                                     ktN*ktI*nfkb*irf+ktA*ktI*ap1*irf+
+                                                     ktA*ktN*ktI*ap1*nfkb*irf)^n)+k0
+    # mRNA ODEs
+    
+    if (gene.clust =="AP1"){ #keeping all original names, but using modv3,p38input
+      dmRNA <-k_syn*fA - k_deg*mRNA #mA, G1S
+    }
+    if (gene.clust =="NFkB"){
+      dmRNA <-k_syn*fN - k_deg*mRNA #mC, G2L, #mB, G2S
+    }
+    if (gene.clust =="NFkB|p38"){
+      dmRNA <-k_syn*fN - k_deg*mRNA  #mD, G10L
+    }
+    if (gene.clust =="NFkB|IRF"){
+      dmRNA <-k_syn*fIN - k_deg*mRNA #mE, G7S
+    }
+    if (gene.clust =="IRF"){
+      dmRNA <-k_syn*fI - k_deg*mRNA #mF, G3S,#mG, G3L
+    }
+    
+    return(list(c(dmRNA) ))
+  })
+}
+odeModel <- function (Time, State, Pars) {
+  with(as.list(c(State, Pars)),{
+    
+    St_name<-stims[Pars[[c("stimulus")]] ]
+    # print(paste0("current St_name ",St_name))
+    # St_name = "TNF"
+    
+    gene.clust = GRS_list[Pars[c("GRS")] ] 
+    # gene.clust = collect_cost_all$best[collect_cost_all$gene==gene]
+    # gene.clust = "G2L" #mC testing just one GRS for now
+    
+    # #AP1 profile
+    # TimepointsA = tf.table.m$time[tf.table.m$tf =="AP1" & tf.table.m$stim==St_name]
+    # TFA_profile = tf.table.m$value[tf.table.m$tf =="AP1" & tf.table.m$stim==St_name]
+    # 
+    # #NFkB profile
+    # TimepointsN = tf.table.m$time[tf.table.m$tf =="NFkB" & tf.table.m$stim==St_name]
+    # TFN_profile = tf.table.m$value[tf.table.m$tf =="NFkB" & tf.table.m$stim==St_name]
+    # 
+    # #IRF profile
+    # TimepointsI = tf.table.m$time[tf.table.m$tf =="IRF" & tf.table.m$stim==St_name]
+    # TFI_profile = tf.table.m$value[tf.table.m$tf =="IRF" & tf.table.m$stim==St_name]
+    # 
+    # #p38 profile
+    # Timepointsp38 = tf.table.m$time[tf.table.m$tf =="p38" & tf.table.m$stim==St_name]
+    # p38_profile = tf.table.m$value[tf.table.m$tf =="p38" & tf.table.m$stim==St_name]
+    
+    n = Pars[c("n")]
+    ktA<-Pars[c("ktA")]
+    ktN<-Pars[c("ktN")]
+    ktI<-Pars[c("ktI")]
+    k0 <-Pars[c("k0")]
+    k_deg = Pars[c("k_deg")]
+    k_deg_p38 = Pars[c("k_deg")]
+    # k_p38 = 1 #modifier of p38 effect on t1/2 #Pars[c("k_p38")]
+    k_syn = k_deg 
+    tau = Pars[c("tau")]
+    cell = Pars[c("cell")]
+    
+    #TF activity forcing function 
+    # ap1 <- approxfun(TimepointsA, TFA_profile, rule =2)(Time-tau)
+    # nfkb <- approxfun(TimepointsN, TFN_profile, rule =2)(Time-tau)
+    # irf <- approxfun(TimepointsI, TFI_profile, rule =2)(Time-tau)
+    # p38 <- approxfun(Timepointsp38, p38_profile, rule =2)(Time)
+    
+    # TFA_profile_df = read.delim(paste0("./generated_scTFinputs/scTFinputs_",St_name,"_AP1.txt"))
+    # TFN_profile_df = read.delim(paste0("./generated_scTFinputs/scTFinputs_",St_name,"_NFkB.txt"))
+    # TFI_profile_df = read.delim(paste0("./generated_scTFinputs/scTFinputs_",St_name,"_IRF.txt"))
+    # p38_profile_df = read.delim(paste0("./generated_scTFinputs/scTFinputs_",St_name,"_p38.txt"))
+    
+    TFA_profile_df = TFA_profile_df_all[TFA_profile_df_all$stim==St_name,-1]
+    TFN_profile_df = TFN_profile_df_all[TFN_profile_df_all$stim==St_name,-1]
+    TFI_profile_df = TFI_profile_df_all[TFI_profile_df_all$stim==St_name,-1]
+    p38_profile_df = p38_profile_df_all[p38_profile_df_all$stim==St_name,-1]
+    
+    TimeRange = c(-49:480)
+    
+    #TF activity forcing function for scTFinputs
+    ap1 <- approxfun(TimeRange, TFA_profile_df[cell,], rule =2)(Time-tau)
+    nfkb <- approxfun(TimeRange, TFN_profile_df[cell,], rule =2)(Time-tau)
+    irf <- approxfun(TimeRange, TFI_profile_df[cell,], rule =2)(Time-tau)
+    p38 <- approxfun(TimeRange, p38_profile_df[cell,], rule =2)(Time)
+    
+    
+    
+    if (St_name=="LPS"|St_name=="P3CSK"|St_name=="CpG"){
+      mRNA_life_mod = (log(2)/k_deg)+(480*p38)
+      # print(mRNA_life_mod)
+      k_deg_p38<-log(2)/mRNA_life_mod
+    }
+    
+    if(0){
+      #plot p38 vs kdeg
+      curve(log(2)/((30)+(480*x)), 0,1, ylab="kdeg",xlab = "[p38]")
+      curve(log(2)/((120)+(480*x)), 0,1, add = T, col = 'purple')
+      curve(log(2)/((180)+(480*x)), 0,1, add = T, col = "gray")
+      curve(log(2)/((300)+(480*x)), 0,1, add = T, col = "pink")
+      
+      #plot TFs vs ksyn
+      curve((1.0-0.005)*((5.2*x)^3/(1.0+(5.2*x)^3))+0.005, 0,1, col = 'blue',ylab="synthesis",xlab = "[TF]")
+      curve((1.0-0.005)*((0.32*x)^3/(1.0+(0.32*x)^3))+0.005, 0,1, add=T,col = 'blue',ylab="synthesis",xlab = "[TF]")
+      curve((1.0-0.005)*((0.65*x)^3/(1.0+(0.65*x)^3))+0.005, 0,1, add = T, col = 'blue',ylab="synthesis",xlab = "[TF]")
+      curve((1.0-0.005)*((1.3*x)^3/(1.0+(1.3*x)^3))+0.005, 0,1, add = T, col = 'blue',ylab="synthesis",xlab = "[TF]")
+      curve((1.0-0.005)*((2.6*x)^3/(1.0+(2.6*x)^3))+0.005, 0,1, add = T,col = 'blue',ylab="synthesis",xlab = "[TF]")
+      
+      curve((1.0-0.005)*((5.2*x)^1/(1.0+(5.2*x)^1))+0.005, 0,1, add = T,col = 'skyblue',ylab="synthesis",xlab = "[TF]")
+      curve((1.0-0.005)*((0.32*x)^1/(1.0+(0.32*x)^1))+0.005, 0,1, add=T,col = 'skyblue',ylab="synthesis",xlab = "[TF]")
+      curve((1.0-0.005)*((0.65*x)^1/(1.0+(0.65*x)^1))+0.005, 0,1, add = T, col = 'skyblue',ylab="synthesis",xlab = "[TF]")
+      curve((1.0-0.005)*((1.3*x)^1/(1.0+(1.3*x)^1))+0.005, 0,1, add = T, col = 'skyblue',ylab="synthesis",xlab = "[TF]")
+      curve((1.0-0.005)*((2.6*x)^1/(1.0+(2.6*x)^1))+0.005, 0,1, add = T,col = 'skyblue',ylab="synthesis",xlab = "[TF]")
+    }
+    
+    #single gates
+    fA<-(1.0-k0)*((ktA*ap1)^n/(1.0+(ktA*ap1)^n))+k0
+    fN<-(1.0-k0)*((ktN*nfkb)^n/(1.0+(ktN*nfkb)^n))+k0
+    fI<-(1.0-k0)*((ktI*irf)^n/(1.0+(ktI*irf)^n))+k0
+    
+    #OR gate
+    fIN<-(1.0-k0)*(((ktN*nfkb)^n+(ktI*irf)^n+(ktN*ktI*nfkb*irf)^n)/(1.0+(ktN*nfkb)^n+(ktI*irf)^n+(ktN*ktI*nfkb*irf)^n))+k0
+    
+    #AND gate
+    fAIN<-(1.0-k0)*((ktA*ktN*ktI*ap1*nfkb*irf)^n /(1.0+ktA*ap1+ktN*nfkb+ktI*irf+ktA*ktN*ap1*nfkb+
+                                                     ktN*ktI*nfkb*irf+ktA*ktI*ap1*irf+
+                                                     ktA*ktN*ktI*ap1*nfkb*irf)^n)+k0
+    # mRNA ODEs
+    
+    if (gene.clust =="AP1"){ #keeping all original names, but using modv3,p38input
+      dmRNA <-k_syn*fA - k_deg*mRNA #mA, G1S
+    }
+    if (gene.clust =="NFkB"){
+      dmRNA <-k_syn*fN - k_deg*mRNA #mC, G2L, #mB, G2S
+    }
+    if (gene.clust =="NFkB|p38"){
+      dmRNA <-k_syn*fN - k_deg_p38*mRNA  #mD, G10L
+    }
+    if (gene.clust =="NFkB|IRF"){
+      dmRNA <-k_syn*fIN - k_deg*mRNA #mE, G7S
+    }
+    if (gene.clust =="IRF"){
+      dmRNA <-k_syn*fI - k_deg*mRNA #mF, G3S,#mG, G3L
+    }
+    
+    return(list(c(dmRNA) ))
+  })
+}
+
+
+
+
+```
+
+
+```{r}
+# params and initialization-------------------------------------------------------------
+pars = c(mRNA = 0.01, n = 1, ktA =0.48 , ktN = 1.3, ktI = 1.25, k0=.005,
+         k_deg=log(2)/30, tau = 0.001, stimulus = NA, cell=NA, GRS = NA)
+# pars = c(mRNA = 0.01, n = 1, ktA =0.5 , ktN = 0.5, ktI = 0.5, k0=.005,  
+#          k_deg=log(2)/90, tau = 0.001, stimulus = NA, cell=NA, GRS = NA)
+
+stims = "LPS" #c("CpG", "IFNB", "LPS","P3CSK", "PIC", "TNF")
+stims = c("CpG", "IFNB", "LPS","P3CSK", "PIC", "TNF")
+GRS_list = c("AP1","NFkB","NFkB|p38","NFkB|IRF","IRF")
+cell_num=50
+set.seed(123)
+cells = sample(c(1:100),cell_num,replace = F)
+
+solve_model_steadystate <- function(pars, times = seq(-300, 0, length=10)) {
+  # times = seq(0, 480, length=500)
+  cnt = 1
+  for (i in stims){
+    
+    pars[c("stimulus")] = c(stimulus = which(stims==i) )
+    # print(pars[c("stimulus")])
+    
+    for(j in cells){
+      pars[c("cell")] = j
+      
+      for (k in GRS_list){
+        pars[c("GRS")] = c(GRS = which(GRS_list==k) )
+        
+        ss.init <- pars[c("mRNA")]
+        params <- pars[c("n", "ktA", "ktN", "ktI", "k0", "k_deg", "tau", "stimulus", "cell", "GRS")]
+        out <- ode(ss.init, times, odeModel_steadystate, params, method = "lsode", atol = 1e-3, rtol = 1e-3)
+        out.frame = as.data.frame(out)
+        out.frame$label = i
+        out.frame$cell = paste0("cell_",j )
+        out.frame$GRS = k
+        out.frame$params = list(pars[c("n", "ktA", "ktN", "ktI", "k0", "k_deg", "tau")])
+        
+        if(cnt==1){
+          collect_out <- out.frame
+          
+        }else{
+          collect_out <-rbind(collect_out, out.frame)
+        }
+        cnt=cnt+1
+      }
+    }
+  }
+  return(collect_out)
+}
+
+
+solve_model <- function(pars, times = seq(0, 480, length=300)) {
+  # times = seq(0, 480, length=500)
+  
+  solve.ss = solve_model_steadystate(pars)
+  steady.state = (solve.ss[nrow(solve.ss),2])
+  
+  cnt = 1
+  for (i in stims){
+    
+    pars[c("mRNA")] <- steady.state
+    
+    # pars[c("mRNA")] <- runsteady(y = c(mRNA=0), #init
+    #                              fun = odeModel_steadystate,
+    #                              parms = pars, time = c(0,1e5))$y
+    
+    
+    pars[c("stimulus")] = c(stimulus = which(stims==i) )
+    print(i)
+    
+    for(j in cells){
+      pars[c("cell")] = j
+      print(paste0("cell_",j ))
+      
+      for (k in GRS_list){
+        print(k)
+        pars[c("GRS")] = c(GRS = which(GRS_list==k) )
+        
+        ss.init <- pars[c("mRNA")]
+        params <- pars[c("n", "ktA", "ktN", "ktI", "k0",  "k_deg", "tau", "stimulus", "cell", "GRS")]
+        out <- ode(ss.init, times, odeModel, params, method = "lsode",atol = 1e-3, rtol = 1e-3)
+        out.frame = as.data.frame(out)
+        out.frame$label = i
+        out.frame$cell = paste0("cell_",j )
+        out.frame$GRS = k
+        out.frame$params = list(pars[c("n", "ktA", "ktN", "ktI", "k0", "k_deg", "tau")])
+        
+        if(cnt==1){
+          collect_out <- out.frame
+          
+        }else{
+          collect_out <-rbind(collect_out, out.frame)
+        }
+        cnt=cnt+1
+      }
+    }
+  }
+  
+  return(collect_out)
+}
+
+```
+
+
+```{r}
+# simulate model with one set of gene reg params-------------------------------------
+par(mfrow=c(1,1))
+solve = solve_model(pars)
+
+#read in if solve already run
+solve = readRDS(paste0("./generated_scTFinputs/output_test_5GRS.rds")) 
+
+solve.truncate = solve[solve$time >-100, ]
+ggplot(data = solve.truncate, aes(time, mRNA, color = cell))+
+  geom_line(aes(group=cell), size = 0.5, alpha=0.9)+
+  xlim(-10, 500)+ theme_bw(base_size = 10)+
+  # stat_summary(aes(time, mRNA),geom="line", color = "black",fun = "mean", size=.3, linetype="dashed")+
+  facet_grid(GRS~label, scales = "free")
+
+```
+
+```{r}
+# generate table of param sets to vary gene reg param--------
+pars = c(mRNA = 0.01, n = 1, ktA =0.48 , ktN = 1.3, ktI = 1.25, k0=.005,
+         k_deg=log(2)/30, tau = 0.001, stimulus = NA, cell=NA, GRS = NA)
+
+
+param_sets = NULL
+for (i in c(1,3)){
+  for (j in c(0.25, 0.5, 1, 2,4)){
+    for (k in c(30,120,180,300)){
+      pars_new = c(mRNA = 0.01, n = i, 
+                   ktA =j*pars[[c('ktA')]] , ktN = j*pars[[c('ktN')]], ktI = j*pars[[c('ktI')]], k0=.005,  
+                   k_deg=(log(2)/k), tau = 0.001, stimulus = NA, cell=NA, GRS = NA)
+      param_sets = rbind(param_sets, pars_new)
+    }
+    
+  }
+  
+}
+param_sets = data.frame(param_sets)
+
+library(doParallel)
+cl <- makeCluster(detectCores()-2)
+registerDoParallel(cl)
+#.export = c("odeModel", "odeModel_steadystate","solve_model","solve_model_steadystate")
+foreach::foreach(i=seq(1:nrow(param_sets)), .packages=c("deSolve")) %dopar% {
+  # .GlobalEnv$mRNA <- mRNA
+  print(i)
+  pars = unlist(param_sets[i,])
+  solve = solve_model(pars)
+  # saveRDS(solve,file = paste0("./generated_scTFinputs/output_test_5GRS_paramset",i,"_LPS.rds"))
+}
+stopCluster(cl)
+
+
+
+```
+
+
+```{r}
+# read back in the outputs and plot-----
+solve.truncate = NULL
+for (i in seq(1:nrow(param_sets))){
+  print(i) #i=9 is average fit
+  solve = readRDS(paste0("./generated_scTFinputs/output_test_5GRS_paramset",i,"_LPS.rds"))
+  
+  #plot for Fig1 (i=13)
+  solve$GRS = factor(solve$GRS, levels = c("AP1","NFkB","NFkB|p38","NFkB|IRF","IRF"))
+  ggplot(data = solve, aes(time/60, mRNA, color = GRS))+ xlab("time (hrs)")+xlim(0,8)+ 
+    scale_color_manual(values = c(AP1="darkorange", IRF="forestgreen",NFkB= "red", `NFkB|p38`= "blue1",`NFkB|IRF`= "darkred"))+
+    geom_line(aes(group=cell), size = 0.1, alpha=0.8)+
+    theme_bw(base_size = 10)+ theme(legend.position = "None")+
+    stat_summary(aes(time/60, mRNA),geom="line", color = "black",fun = "mean", linewidth=.3, alpha=0.4,linetype="dashed")+
+    facet_wrap(~GRS, nrow=1,scales = "free")+ggtitle(solve$params[i])
+  #plot for Fig1, cell_23, cell_50, cell_7, cell_32
+  ggplot(data = solve[grepl("cell_32$",solve$cell)&grepl("NFkB$|AP1$|^IRF$",solve$GRS),], aes(time, mRNA, color = GRS))+
+    scale_color_manual(values = c(AP1="darkorange", IRF="forestgreen",NFkB= "red", `NFkB|p38`= "blue1",`NFkB|IRF`= "darkred"))+
+    geom_line(aes(group=GRS), size = 1, alpha=0.9)+
+    xlim(-10, 500)+ theme_bw(base_size = 10)+theme_classic(base_size = 14)+theme(legend.position = "None")+
+    ggtitle(solve$params[i])
+  
+  
+  ggplot(data = solve, aes(time, mRNA, color = cell))+
+    geom_line(aes(group=cell), size = 0.1, alpha=0.9)+
+    xlim(-10, 500)+ theme_bw(base_size = 10)+ theme(legend.position = "None")+
+    stat_summary(aes(time, mRNA),geom="line", color = "black",fun = "mean", linewidth=.3, linetype="dashed")+
+    facet_grid(GRS~label, scales = "free")+ggtitle(solve$params[i])
+  # print(p)
+  ggsave(paste0("./generated_scTFinputs/output_test_5GRS_paramset",i,"_LPS.pdf"),
+         width = 3.5,height = 7,units = "in")
+  # solve.truncate = rbind(solve.truncate, solve)
+}
+
+
+```
+
+
+```{r}
+# rearrange to perform scREALTIME----
+collect_expression_all = NULL
+for (i in seq(1:nrow(param_sets))){
+  print(i)
+  collect_expression_paramset = NULL
+  
+  for (j in  c("AP1","NFkB","NFkB|p38","NFkB|IRF","IRF")){
+    print(j)
+    solve = readRDS(paste0("./generated_scTFinputs/output_test_5GRS_paramsets/output_test_5GRS_paramset",i,".rds"))
+    #label each gene by GRS_n_Kd_kdeg
+    # solve$genename = paste0(solve$GRS,"_", solve$params[["n"]], "_",
+    #                         solve$params[["ktA"]], "_", signif(solve$params[["k_deg"]],2))
+    tmp = solve[solve$GRS==j,] #separate out each GRS
+    colnames(tmp)[2] = paste0(j,"_n", param_sets$n[i], "_ktA",
+                              param_sets$ktA[i], "_kdeg", log(2)/param_sets$k_deg[i])
+    
+    if(is.null(collect_expression_paramset)){
+      collect_expression_paramset = rbind(collect_expression_paramset, tmp[,1:(ncol(tmp)-2)]) #remove paramset and GRS
+    }else{
+      collect_expression_paramset = cbind(collect_expression_paramset, data.frame(tmp[,2,drop=F])) # add mRNA col
+    }
+  }
+  collect_expression_paramset = collect_expression_paramset[c(1,3,4,2,5:ncol(collect_expression_paramset))]
+  
+  if(is.null(collect_expression_all)){
+    collect_expression_all = rbind(collect_expression_all, collect_expression_paramset)
+  }else{
+    collect_expression_all = cbind(collect_expression_all, collect_expression_paramset[,-c(1:3)])
+  }
+  
+}
+# saveRDS(collect_expression_all, paste0("./generated_scTFinputs/output_test_5GRS_all40paramsets_LPS.rds"))
+# saveRDS(collect_expression_all, paste0("./generated_scTFinputs/output_test_5GRS_all70paramsets_allstims.rds"))
+
+
+```
+
+
+```{r}
+#rearrange to perform scREALTiME and add 10% transcriptional noise at the same time-----
+collect_expression_all = NULL
+for (i in seq(1:nrow(param_sets))){
+  print(i)
+  collect_expression_paramset = NULL
+  
+  for (j in  c("AP1","NFkB","NFkB|p38","NFkB|IRF","IRF")){
+    print(j)
+    solve = readRDS(paste0("./generated_scTFinputs/output_test_5GRS_paramset",i,"_LPS.rds"))
+    #label each gene by GRS_n_Kd_kdeg
+    # solve$genename = paste0(solve$GRS,"_", solve$params[["n"]], "_",
+    #                         solve$params[["ktA"]], "_", signif(solve$params[["k_deg"]],2))
+    tmp = solve[solve$GRS==j,] #separate out each GRS
+    colnames(tmp)[2] = paste0(j,"_n", param_sets$n[i], "_ktA",
+                              param_sets$ktA[i], "_kdeg", log(2)/param_sets$k_deg[i])
+    
+    if(is.null(collect_expression_paramset)){
+      collect_expression_paramset = rbind(collect_expression_paramset, tmp[,1:(ncol(tmp)-2)]) #remove paramset and GRS
+    }else{
+      collect_expression_paramset = cbind(collect_expression_paramset, data.frame(tmp[,2,drop=F])) # add mRNA col
+    }
+  }
+  collect_expression_paramset = collect_expression_paramset[c(1,3,4,2,5:ncol(collect_expression_paramset))]
+  
+  if(is.null(collect_expression_all)){
+    collect_expression_all = rbind(collect_expression_all, collect_expression_paramset)
+  }else{
+    collect_expression_all = cbind(collect_expression_all, collect_expression_paramset[,-c(1:3)])
+  }
+  
+}
+
+jitter.custom <- function(x) jitter(x, factor = 5, amount = 0)
+
+collect_expression_jitter = cbind(collect_expression_all[,c(1:3)],
+                                  data.frame(lapply(collect_expression_all[,-c(1:3)], FUN = jitter.custom)))
+ggplot(collect_expression_jitter, aes(time,`NFkB_n1_ktA0.48_kdeg30`, group = cell)) +
+  # geom_vline(xintercept = c(0,0.25,1,3,8), linetype="dotted")+ #theme(axis.title.x=element_blank(),axis.title.y=element_blank())+
+  # geom_vline(xintercept = c(0,0.5,1,3,5,8), linetype="dotted")+
+  geom_line(aes(group = as.factor(cell), color = stimulus), alpha = 0.5)+
+  theme_bw(base_size = 14)+theme(legend.position = "none")
+# saveRDS(collect_expression_jitter, paste0("./generated_scTFinputs/output_txnnoisejitter_5GRS_all40paramsets_LPS.rds"))
+# saveRDS(collect_expression_jitter, paste0("./generated_scTFinputs/output_txnnoise10p.jitter_5GRS_all40paramsets_LPS.rds"))
+
+
+```
+
+
+```{r}
+#make Seurat object----
+library(scREALTIME)
+if(1){
+  # collect_expression_all = readRDS("./generated_scTFinputs/output_txnnoisejitter_5GRS_all40paramsets_LPS.rds")
+  # collect_expression_all = readRDS("./generated_scTFinputs/output_txnnoise10p.jitter_5GRS_all40paramsets_LPS.rds")
+  # collect_expression_all = readRDS("./generated_scTFinputs/output_test_5GRS_all40paramsets_LPS.rds")
+  
+  timepoints = unique(collect_expression_all$time)
+  num_used_timepoints =5 # Use 5 evenly spaced timepoints
+  # 480 min = 8 hours, 0 hr time point, integrated over 300 timepoints
+  
+  select_timepoints = seq(1,length(timepoints),length.out = num_used_timepoints)
+  select_timepoints = seq(2,length(timepoints),length.out = num_used_timepoints)#avoiding 0 timept for simulated data
+  select_timepoints = timepoints[select_timepoints]
+  
+  #handpick select timepoints
+  # select_timepoints = timepoints[c(2,20,39,113,300)] #0,0.5hr,1hr,3hr, 8hr
+  # select_timepoints = timepoints[c(2,188,263,281,300)] #0, 5hr,7hr, 7.5hr, 8hr
+  
+  print(timepoints)
+  print(select_timepoints)
+  
+  # Show PCA trajectories and true trajectories (for each gene)
+  num_cells_for_lineplots = 50 #50 simulated cells
+  numgenes = 200 #(40paramsets * 5GRSs)
+  
+  pca = prcomp(collect_expression_all[1:(length(timepoints) * num_cells_for_lineplots),4:(numgenes+3)], center = F,scale = FALSE) # 3 cells
+  inds = seq(1,(length(timepoints) * num_cells_for_lineplots), length.out = num_used_timepoints * num_cells_for_lineplots)
+  
+  # Cast to Seurat object
+  
+  data_for_Seurat = as.data.frame(t(collect_expression_all[collect_expression_all$time %in% select_timepoints,4:(numgenes+3)]))
+  meta = collect_expression_all[collect_expression_all$time %in% select_timepoints,1:3]
+  rownames(meta)= paste0(meta$label,"_",meta$cell,"_",round(meta$time,2))
+  colnames(data_for_Seurat) = rownames(meta)
+  # transpose
+  # store in RNA assay slot directly -- no normalization
+  require('Seurat')
+  macro_LPS= CreateSeuratObject(data_for_Seurat, meta.data = meta, project = 'simulations')
+  macro_LPS@meta.data$stimulus = sapply(strsplit(rownames(macro_LPS@meta.data),"_"), `[`, 1)
+  macro_LPS@meta.data$cell = paste0("cell_",sapply(strsplit(rownames(macro_LPS@meta.data),"_"), `[`, 3))
+  macro_LPS@meta.data$timept = paste(sapply(strsplit(rownames(macro_LPS@meta.data),"_"), `[`, 4), 'min', sep = '')
+  macro_LPS@meta.data$timept_num = as.numeric(sapply(strsplit(rownames(macro_LPS@meta.data),"_"), `[`, 4))
+  head(macro_LPS@meta.data)
+  # Data viz
+  # VlnPlot(macro_LPS, features = c("nFeature_RNA", "nCount_RNA"), ncol = 2)
+  # FeatureScatter(macro_LPS, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+  
+  #Finding variable features (note: normalization skipped)
+  macro_LPS <- FindVariableFeatures(macro_LPS, selection.method = "vst", nfeatures = 200)
+  
+  # Identify the 10 most highly variable genes
+  top10 <- head(VariableFeatures(macro_LPS), 10)
+  top10
+  
+  # plot variable features with and without labels
+  plot1 <- VariableFeaturePlot(macro_LPS)
+  plot2 <- LabelPoints(plot = plot1, points = top10, repel = TRUE)
+  plot2
+  
+  if(0){
+    #plot variable features over timepts
+    collect_variablefeatures = NULL
+    for (t in unique(macro_LPS$timept_num)){
+      print(t)
+      macro_LPS.subset = subset(macro_LPS, subset = timept_num ==t)
+      macro_LPS.subset = FindVariableFeatures(macro_LPS.subset, selection.method = "vst", nfeatures = 200)
+      tmp = macro_LPS.subset$RNA@meta.features
+      collect_variablefeatures = cbind(collect_variablefeatures, tmp$vst.variance)
+    }
+    collect_variablefeatures = as.data.frame(collect_variablefeatures)
+    colnames(collect_variablefeatures) = unique(macro_LPS$timept_num)
+    rownames(collect_variablefeatures) = rownames(macro_LPS$RNA@meta.features)
+    collect_variablefeatures = cbind(gene = rownames(collect_variablefeatures), collect_variablefeatures)
+    collect_variablefeatures.m = melt(collect_variablefeatures)
+    collect_variablefeatures.m$GRS = gsub("-..*","",collect_variablefeatures.m$gene)
+    ggplot(collect_variablefeatures.m, aes(as.numeric(variable), log10(value)))+
+      geom_path(aes(group = gene, color = GRS), alpha = 0.25)+ ylab("log10(variance)")+xlab("time")+
+      geom_point(aes(color = GRS),size=0.5)+theme_classic(base_size = 14)+facet_wrap(~GRS,ncol = 3)
+  }
+  
+  # scaling (before PCA)
+  macro_LPS <- FindVariableFeatures(macro_LPS)
+  all.genes <- rownames(macro_LPS)
+  macro_LPS <- ScaleData(macro_LPS)
+  
+  #PCA
+  macro_LPS[["RNA"]]@scale.data = as.matrix(macro_LPS[["RNA"]]@data)
+  macro_LPS <- RunPCA(macro_LPS,assay = "RNA", scale =F, center = F)
+  print(macro_LPS[["pca"]], dims = 1:5, nfeatures = 5)
+  VizDimLoadings(macro_LPS, dims = 1:2, reduction = "pca")
+  DimPlot(macro_LPS, reduction = "pca", group.by = "timept")#+theme(legend.position = "None")
+  DimHeatmap(macro_LPS, dims = 1:5, cells = 50, balanced = TRUE)
+  
+  #plot PCA with lines connecting timepts
+  data = macro_LPS@meta.data
+  pca = data.frame(macro_LPS@reductions$pca@cell.embeddings)
+  data$PC1 = pca$PC_1[match(rownames(data), rownames(macro_LPS@reductions$pca))]
+  data$PC2 = pca$PC_2[match(rownames(data), rownames(macro_LPS@reductions$pca))]
+  head(data)
+  ggplot(data, aes(PC1,PC2, group=cell))+geom_path(aes(group = cell), alpha=0.25)+
+    geom_point(aes(color = timept),size=1.5)+theme_classic(base_size = 16)+theme(legend.position = "none")
+  
+  macro_LPS@active.assay
+  # saveRDS(macro_LPS, paste0("./generated_scTFinputs/LPS_simulatedwGeneratedscTF_",num_used_timepoints,"timepts.rds"))
+  # saveRDS(macro_LPS, paste0("./generated_scTFinputs/LPS_simulatedwGeneratedscTF.txnnoisejitter_",num_used_timepoints,"timepts.rds"))
+  # saveRDS(macro_LPS, paste0("./generated_scTFinputs/LPS_simulatedwGeneratedscTF.txnnoise10p.jitter_",num_used_timepoints,"timepts.rds"))
+  
+  #5timepts as measured
+  # saveRDS(macro_LPS, paste0("./generated_scTFinputs/LPS_simulatedwGeneratedscTF_",num_used_timepoints,"timepts.selected.rds"))
+  # saveRDS(macro_LPS, paste0("./generated_scTFinputs/LPS_simulatedwGeneratedscTF.txnnoisejitter_",num_used_timepoints,"timepts.selected.rds"))
+  # saveRDS(macro_LPS, paste0("./generated_scTFinputs/LPS_simulatedwGeneratedscTF.txnnoise10p.jitter_",num_used_timepoints,"timepts.selected.rds"))
+  
+}
+
+# run scREALTIME
+library(scREALTIME)
+if (1){
+  
+  num_used_timepoints = 5
+  macro_LPS = readRDS(paste0("./generated_scTFinputs/LPS_simulatedwGeneratedscTF_",num_used_timepoints,"timepts.rds"))
+  
+  #5timepts selected
+  # macro_LPS = readRDS(paste0("./generated_scTFinputs/LPS_simulatedwGeneratedscTF_",num_used_timepoints,"timepts.selected.rds"))
+  
+  select_timepoints = unique(macro_LPS$time)
+  
+  ## Sims
+  n="LPS"
+  select_timepoints = round(select_timepoints,2)
+  PCAPlot(macro_LPS, dims = c(1,2), cells = as.vector(rownames(metadata)), group.by = 'timept', shuffle = TRUE, label = TRUE, label.box = TRUE) + ggtitle('PCA with PC 2 and 3')
+  
+  num_archetypes = 20 #if no file label, then default was 10 archetypes
+  interpl = "spline.mono"
+  
+  set.seed(1)
+  reconst = getTrajectory4(macro = macro_LPS, metadata = macro_LPS@meta.data, num_archetypes = num_archetypes,data = "RNA",
+                           timepoints = select_timepoints, num_trajectories = 100, num_sim_pts = 100,
+                           reduction = 'pca', stimulus = n, consensus_measure = 'mean',
+                           interpolant = interpl, prob_method = 'distance', distance_metric = 'euclidean' ,
+                           varFilter = F, exp_prob = 1) 
+  
+  saveRDS(reconst, paste0("./generated_scTFinputs/LPS_",interpl,"_uncentered_",num_used_timepoints,"timepts.used_",num_archetypes,"archetypes.rds"))
+  
+  #5timepts selected
+  # saveRDS(reconst, paste0("./generated_scTFinputs/LPS_",interpl,"_uncentered_",num_used_timepoints,"timepts.selected.used_",num_archetypes,"archetypes.rds"))
+  
+}
+
+
+```
+
+
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
