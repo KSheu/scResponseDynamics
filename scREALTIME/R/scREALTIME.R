@@ -26,8 +26,8 @@ scREALTIME = function(macro, metadata, num_archetypes=20, timepoints, num_trajec
                       reduction = "pca", stimulus, consensus_measure = "median", interpolant="spline", data = "RNA", prob_method = 'distance', distance_metric = 'euclidean', varFilter = T, exp_prob = 1){
 
 
-  require(NbClust); require(matrixStats); require(Rfast);require(Seurat);require(devtools)
-  require(RColorBrewer); require(ggplot2); require(gridExtra);
+  # require(NbClust); require(matrixStats); require(Rfast);require(Seurat);require(devtools)
+  # require(RColorBrewer); require(ggplot2); require(gridExtra);
 
 
   # retrieve desired data subset------------------------------------------------
