@@ -1849,7 +1849,7 @@ if (1){ #rescale 0-1 or not----
 } 
 
 ###############################################################################
-# Figure 3: plot macrophage measureddata ----
+# Figure 3: plot macrophage measured data ----
 ###############################################################################
 
 # plot violins, group by timepoint----
@@ -1952,8 +1952,8 @@ if(1){
 
 
 ###############################################################################
-# Figure 5: impute all trajectories - March 2022 redo----
-# Note to self: from F://BACKUP.../Projects.../trajectory_method/tensor_trajectory.R
+# Figure 3: impute all trajectories ----
+# Note: from F://BACKUP.../Projects.../trajectory_method/tensor_trajectory.R
 
 ###############################################################################
 
@@ -2644,7 +2644,7 @@ ggplot(dynamics.dcast[grepl("CpG|LPS|TNF",dynamics.dcast$stimulus),], aes(spd.Tn
   stat_cor(aes(color =type),method = "pearson", label.x = 0)+
   theme_bw(base_size = 14)+ggtitle(gene)+theme(legend.position = "none")
 
-#make correlation violin/bar plots------
+# make correlation violin/bar plots------
 combine = data.frame()
 feature = "spd"
 for (t in c("M0","M1","M2")){
@@ -2677,8 +2677,160 @@ ggplot(na.omit((combine[grepl(geneset,combine$Var1)&grepl(geneset, combine$Var2)
 
 
 
+
 ###############################################################################
-# Figure 6: Response Dynamics allows better polarization state identification----
+# Figure 6: polarized macrophages
+###############################################################################
+####################################################### plot the trajectories-----
+# plot scaled across all stimuli, comment/uncomment for M0, M1, M2----
+reduction_name = "pca"
+interpl = "spline"
+num_archetypes = 20
+mat_allstims <- list()
+num_sim_pts = 100+3
+num_paths_sum = 0
+labels = c()
+labels2 = c()
+gc();gc();gc()
+for (stim in c("LPS", "TNF","P3CSK","CpG", "PIC","IFNb")){
+  print(stim)
+  # reconstructed_pc = readRDS(paste0("./trajectory/reconstructed_",reduction_name,"_",stim,"_k_", num_archetypes))
+  reconstructed_pc = readRDS(paste0("./trajectory/reconstructed_M0_rep2only_500genes_",reduction_name,"onallstims_",stim, "_",interpl,"_k_", num_archetypes,".rds"))
+  # reconstructed_pc = readRDS(paste0("./trajectory/reconstructed_M1_IFNg_500genes_",reduction_name,"onallstims_",stim, "_",interpl,"_k_", num_archetypes,".rds"))
+  # reconstructed_pc = readRDS(paste0("./trajectory/reconstructed_M2_IL4_gt80_500genes_",reduction_name,"onallstims_",stim, "_",interpl,"_k_", num_archetypes,".rds"))
+  
+  num_paths = length(unique(reconstructed_pc$reconstructed_trajectories$path))
+  num_timepts = length(unique(reconstructed_pc$reconstructed_trajectories$time))
+  
+  reconstructed_pc.traj = (reconstructed_pc$reconstructed_trajectories)
+  reconstructed_pc.traj$stimulus = stim
+  mat_allstims <- rbind(mat_allstims, reconstructed_pc.traj)
+  
+  num_paths_sum = num_paths_sum + num_paths
+  labels = c(labels, rep(stim, num_paths))
+}
+
+mat.numbers = mat_allstims[,!grepl("time|path|stimulus", colnames(mat_allstims))]
+mat.meta = mat_allstims[,grepl("time|path|stimulus", colnames(mat_allstims))]
+if (1){ #rescale 0-1 or not----
+  mat.numbers = apply(mat.numbers, MARGIN = 2, FUN = function(X) (X - min(X))/diff(range(X))) #rescale each gene column 0-1 over all stims
+  # mat.numbers = cbind(mat.numbers, mat.meta)
+} 
+if (0){ #scale to max and set negative to 0----
+  mat.numbers = apply(mat.numbers, MARGIN = 2, FUN = function(X) (X /max(X))) #rescale each gene column to max over all stims
+  mat.numbers[mat.numbers <0] = 0
+} 
+
+#PCA on dynamical features, M0M1M2 combined----
+dynamics_M0$cell = paste0(dynamics_M0$cell, "_M0")
+dynamics_M1$cell = paste0(dynamics_M1$cell, "_M1")
+dynamics_M2$cell = paste0(dynamics_M2$cell, "_M2")
+dynamics = rbind(dynamics_M0, dynamics_M1, dynamics_M2)
+dynamics$type = gsub(".*_", "", dynamics$cell)
+for (feature in c("peak_amp","peak_amp_lfc" ,"integral" ,"speed1hr","duration0.25","time2halfint")){
+  dynamics.dcast = dcast(dynamics, gene~cell, value.var = feature)
+  write.table(na.omit(dynamics.dcast), paste0("./trajectory/matrix_trajectory_features_M0M1M2_",feature,"_k20.txt"),
+              row.names = F, sep = "\t", quote=F)
+}
+for (feature in c("peak_amp","peak_amp_lfc" ,"integral" ,"speed1hr","duration0.25","time2halfint")){
+  PCA_from_file(paste0("./trajectory/matrix_trajectory_features_M0M1M2_",feature,"_k20.txt"),
+                center =T, scale = F)
+}
+for (feature in c("peak_amp","peak_amp_lfc" ,"integral" ,"speed1hr","duration0.25","time2halfint")){
+  setwd("F://scRNAseq_macro/scRNAseq_macro/trajectory/")
+  plot_pca(paste0("./matrix_trajectory_features_M0M1M2_",feature,"_k20_prcomp_scores.txt"),
+           info.name = paste0("X",dynamics$cell), info.type = as.factor(dynamics$stimulus), labels = F,
+           alpha=0.5, pt.size=.5, title = feature)
+  plot_pca(paste0("./matrix_trajectory_features_M0M1M2_",feature,"_k20_prcomp_scores.txt"),
+           info.name = paste0("X",dynamics$cell), info.type = as.factor(dynamics$type), labels = F,
+           alpha=0.5, pt.size=.5, title = feature)
+  setwd("F://scRNAseq_macro/scRNAseq_macro/")
+}
+#plot PCA loadings-------
+feature = "integral"#"speed1hr" #"peak_amp_lfc"
+loadings = read.delim(paste0("./trajectory/matrix_trajectory_features_M0M1M2_",feature,"_k20_prcomp_loadings.txt"))
+scores = read.delim(paste0("./trajectory/matrix_trajectory_features_M0M1M2_",feature,"_k20_prcomp_scores.txt"))
+clusters = readxl::read_excel("F://scRNAseq_macro/SuppTables/TableS4_gene_regulatory_strategies_allgenes.xlsx")
+loadings$GRS = clusters$clusters[match(loadings$Loading, clusters$gene)]
+tmp = loadings[,c(1:3,496)]
+colors_list = c("darkorange", "gold","darkgreen", "lightblue","darkred")
+colors_list = c("darkorange", "forestgreen","red", "blue1","darkred")
+ggplot(loadings, aes(PC1, PC2))+geom_point(aes(fill = GRS), pch=21, size=3, alpha=0.8)+
+  scale_fill_manual(values = colors_list)+
+  theme_bw(base_size = 16)+ggtitle(feature)+geom_hline(yintercept = 0)+geom_vline(xintercept = 0)
+
+#collect dim best start with 1D top 20 (done on Precision)---- 
+
+collect_all = read.delim("./infotheo/dynamics_k20_trajectoryfeatures_singlegene_SLEMI_M0.txt")
+collect_all = read.delim("./infotheo/dynamics_k20_trajectoryfeatures_singlegene_SLEMI_M1.txt")
+collect_all = read.delim("./infotheo/dynamics_k20_trajectoryfeatures_singlegene_SLEMI_M2.txt")
+
+dynamics = dynamics_M0
+dynamics = dynamics_M1
+dynamics = dynamics_M2
+
+collect_all = collect_all[order(collect_all$cc, decreasing = T), ]
+require(data.table) ## 1.9.2
+collect_all <- as.data.table(collect_all)
+collect_all_best = collect_all[collect_all[, .I[cc == max(cc)], by="feature"]$V1] 
+collect_all_best$dim = 0
+collect_all_best = collect_all_best[, c("feature", "dim","cc",  "gene")]
+table(collect_all_best$feature)
+
+collect = data.frame()
+collect_dimensionbest = data.frame()
+
+for (i in c("peak_amp","peak_amp_lfc", "integral", "speed", "time2peak", "logFCmax", "speed1hr", "duration")){
+  print(i)
+  
+  collect_dimension = (collect_all[grepl(i, collect_all$feature),][(1:20),]) #start 1D
+  
+  my.dataframe = dynamics[, c("gene","stimulus", i)]
+  my.dataframe = cbind(cell = rep(1: 5996), my.dataframe)
+  my.dataframe = dcast(my.dataframe, stimulus+cell~gene, value.var = i)
+  
+  for (d in seq(1:5)){
+    print(paste0("dimension: ",d))
+    
+    collect_dimension = collect_dimension[order(collect_dimension$cc, decreasing =T),]
+    genesets = collect_dimension$gene[c(1:20)]
+    print(genesets)
+    
+    collect_dimension = data.frame() #start over once got the top20
+    for (g in 1:length(genesets)){
+      genes = genesets[[g]]
+      print(genes)
+      
+      other_genes = c(colnames(my.dataframe)[!colnames(my.dataframe) %in% genes])
+      other_genes
+      for (a in 1:length(other_genes)){
+        added_gene = other_genes[a+1]
+        added_gene
+        my.dataframe.subset = my.dataframe[, colnames(my.dataframe) %in% c("stimulus", genes, added_gene)]
+        str(my.dataframe.subset)
+        
+        output_capacity <- capacity_logreg_main(my.dataframe.subset, signal = "stimulus", response = colnames(my.dataframe.subset)[-1],
+                                                output_path = NULL, testing = F)
+        
+        tmp = data.frame(feature = i,  dim = d, cc = output_capacity$cc)
+        tmp$gene = list(c(genes, added_gene))
+        collect_dimension = rbind(collect_dimension, tmp)
+      }
+      
+    }
+    collect_dimension = collect_dimension[order(collect_dimension$cc, decreasing =T),]
+    collect_dimensionbest = rbind(collect_dimensionbest,
+                                  data.frame(collect_dimension[1,]))
+    
+  }
+}
+
+# saveRDS(collect_dimensionbest,"./infotheo/collect_dimensionbest_dynamics_trajfeatures_M0_May2022.rds")
+
+
+
+###############################################################################
+# Figure 7: Response Dynamics allows better polarization state identification----
 ###############################################################################
 
 #machine learning model LASSO on dynamics----
@@ -2920,74 +3072,4 @@ ggplot(collect_all, aes(stimulus, f1.avg)) +geom_bar(stat = "identity",aes(fill=
   facet_wrap(~feature, nrow = 1)+
   scale_fill_manual(values = colors_list)+ ylab("F1 score - top 5 genes")+
   theme_bw(base_size = 14)+theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
-
-
-###############################################################################
-# Figure 6: collect dim best start with 1D top 20 (done on Precision)---- 
-###############################################################################
-collect_all = read.delim("./infotheo/dynamics_k20_trajectoryfeatures_singlegene_SLEMI_M0.txt")
-collect_all = read.delim("./infotheo/dynamics_k20_trajectoryfeatures_singlegene_SLEMI_M1.txt")
-collect_all = read.delim("./infotheo/dynamics_k20_trajectoryfeatures_singlegene_SLEMI_M2.txt")
-
-dynamics = dynamics_M0
-dynamics = dynamics_M1
-dynamics = dynamics_M2
-
-collect_all = collect_all[order(collect_all$cc, decreasing = T), ]
-require(data.table) ## 1.9.2
-collect_all <- as.data.table(collect_all)
-collect_all_best = collect_all[collect_all[, .I[cc == max(cc)], by="feature"]$V1] 
-collect_all_best$dim = 0
-collect_all_best = collect_all_best[, c("feature", "dim","cc",  "gene")]
-table(collect_all_best$feature)
-
-collect = data.frame()
-collect_dimensionbest = data.frame()
-
-for (i in c("peak_amp","peak_amp_lfc", "integral", "speed", "time2peak", "logFCmax", "speed1hr", "duration")){
-  print(i)
-  
-  collect_dimension = (collect_all[grepl(i, collect_all$feature),][(1:20),]) #start 1D
-  
-  my.dataframe = dynamics[, c("gene","stimulus", i)]
-  my.dataframe = cbind(cell = rep(1: 5996), my.dataframe)
-  my.dataframe = dcast(my.dataframe, stimulus+cell~gene, value.var = i)
-  
-  for (d in seq(1:5)){
-    print(paste0("dimension: ",d))
-    
-    collect_dimension = collect_dimension[order(collect_dimension$cc, decreasing =T),]
-    genesets = collect_dimension$gene[c(1:20)]
-    print(genesets)
-    
-    collect_dimension = data.frame() #start over once got the top20
-    for (g in 1:length(genesets)){
-      genes = genesets[[g]]
-      print(genes)
-      
-      other_genes = c(colnames(my.dataframe)[!colnames(my.dataframe) %in% genes])
-      other_genes
-      for (a in 1:length(other_genes)){
-        added_gene = other_genes[a+1]
-        added_gene
-        my.dataframe.subset = my.dataframe[, colnames(my.dataframe) %in% c("stimulus", genes, added_gene)]
-        str(my.dataframe.subset)
-        
-        output_capacity <- capacity_logreg_main(my.dataframe.subset, signal = "stimulus", response = colnames(my.dataframe.subset)[-1],
-                                                output_path = NULL, testing = F)
-        
-        tmp = data.frame(feature = i,  dim = d, cc = output_capacity$cc)
-        tmp$gene = list(c(genes, added_gene))
-        collect_dimension = rbind(collect_dimension, tmp)
-      }
-      
-    }
-    collect_dimension = collect_dimension[order(collect_dimension$cc, decreasing =T),]
-    collect_dimensionbest = rbind(collect_dimensionbest,
-                                  data.frame(collect_dimension[1,]))
-    
-  }
-}
-
-# saveRDS(collect_dimensionbest,"./infotheo/collect_dimensionbest_dynamics_trajfeatures_M0_May2022.rds")
 
