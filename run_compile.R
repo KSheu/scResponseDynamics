@@ -1109,7 +1109,7 @@ if (1){
 
 
 #####################################################################
-#Figure 2: Evaluation of scGETs imputation method against ground truth
+#Figure 2: Evaluation of scGETs imputation method against ground truth----
 #####################################################################
 
 #test the probability matrix step without k-means---------------------------
@@ -2679,7 +2679,7 @@ ggplot(na.omit((combine[grepl(geneset,combine$Var1)&grepl(geneset, combine$Var2)
 
 
 ###############################################################################
-# Figure 6: polarized macrophages
+# Figure 6: polarized macrophages----
 ###############################################################################
 ####################################################### plot the trajectories-----
 # plot scaled across all stimuli, comment/uncomment for M0, M1, M2----
