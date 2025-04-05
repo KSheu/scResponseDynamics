@@ -1,7 +1,7 @@
 # scResponseDynamics
 Stimulus-induced gene expression dynamics in single macrophage cells (Sheu et al, 2024)
 
-<img src="https://github.com/KSheu/scResponseDynamics/blob/main/GA_MolCell2024.pngg" width="350" height="350">
+<img src="https://github.com/KSheu/scResponseDynamics/blob/main/GA_MolCell2024.png" width="350" height="350">
 
 ## In Brief
 Because RNA measurements are cell destructive, it is unclear how variable stimulus-induced dynamic gene expression trajectories (GETs) are. Sheu et al. developed a method to assess single-cell gene expression trajectories (scGETs) in macrophages responding to stimuli and found scGETs to be much more informative than any single timepoint measurement.
